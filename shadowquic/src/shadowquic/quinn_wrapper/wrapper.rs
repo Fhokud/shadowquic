@@ -1,4 +1,11 @@
-use std::{io, net::SocketAddr, ops::Deref, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    io,
+    net::SocketAddr,
+    ops::Deref,
+    sync::{Arc, Mutex, OnceLock},
+    time::Duration,
+};
 
 use super::brutal::BrutalConfig;
 use async_trait::async_trait;
@@ -12,7 +19,7 @@ use quinn::{
     congestion::{BbrConfig, CubicConfig, NewRenoConfig},
 };
 use socket2::{Domain, Protocol, Socket, Type};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{Level, debug, error, trace, warn};
 
 use quinn::rustls::ServerConfig as RustlsServerConfig;
 
@@ -30,6 +37,9 @@ use crate::{
 };
 
 pub type Connection = quinn::Connection;
+const MAX_TRACKED_CONNECTIONS: usize = 1024;
+const LOSS_STATS_SAMPLE_WINDOW: usize = 8;
+
 pub struct Endpoint {
     inner: quinn::Endpoint,
     zero_rtt: bool,
@@ -49,14 +59,7 @@ impl QuicConnection for Connection {
     type RecvStream = quinn::RecvStream;
     type SendStream = quinn::SendStream;
     async fn open_bi(&self) -> Result<(Self::SendStream, Self::RecvStream, u64), QuicErrorRepr> {
-        let rate: f32 =
-            (self.stats().path.lost_packets as f32) / ((self.stats().path.sent_packets + 1) as f32);
-        info!(
-            "packet_loss_rate:{:.2}%, rtt:{:?}, mtu:{}",
-            rate * 100.0,
-            self.rtt(),
-            self.stats().path.current_mtu,
-        );
+        log_quic_path_stats(self, "open_bi");
         let (send, recv) = self.open_bi().await?;
 
         let id = send.id().index();
@@ -66,14 +69,7 @@ impl QuicConnection for Connection {
     async fn accept_bi(&self) -> Result<(Self::SendStream, Self::RecvStream, u64), QuicErrorRepr> {
         let (send, recv) = self.accept_bi().await?;
 
-        let rate: f32 =
-            (self.stats().path.lost_packets as f32) / ((self.stats().path.sent_packets + 1) as f32);
-        info!(
-            "packet_loss_rate:{:.2}%, rtt:{:?}, mtu:{}",
-            rate * 100.0,
-            self.rtt(),
-            self.stats().path.current_mtu,
-        );
+        log_quic_path_stats(self, "accept_bi");
 
         let id = send.id().index();
         Ok((send, recv, id))
@@ -122,6 +118,128 @@ impl QuicConnection for Connection {
     fn close(&self, error_code: u64, reason: &[u8]) {
         self.close(VarInt::from_u64(error_code).unwrap(), reason);
     }
+}
+
+fn log_quic_path_stats(conn: &Connection, event: &'static str) {
+    if !tracing::enabled!(Level::DEBUG) {
+        return;
+    }
+
+    let stats = conn.stats();
+    let path = stats.path;
+    let sample = PathStatsSample {
+        sent_packets: path.sent_packets,
+        lost_packets: path.lost_packets,
+        lost_bytes: path.lost_bytes,
+    };
+
+    if path.sent_packets == 0 {
+        debug!(
+            event,
+            rtt = ?conn.rtt(),
+            mtu = path.current_mtu,
+            "quic path stats unavailable before any packet is sent",
+        );
+        return;
+    }
+
+    let baseline = path_stats_samples()
+        .lock()
+        .expect("path stats sample lock poisoned")
+        .record(conn.stable_id(), sample);
+    if let Some(baseline) = baseline {
+        let sent_delta = path.sent_packets.saturating_sub(baseline.sent_packets);
+        let lost_delta = path.lost_packets.saturating_sub(baseline.lost_packets);
+        let lost_bytes_delta = path.lost_bytes.saturating_sub(baseline.lost_bytes);
+        if sent_delta == 0 {
+            debug!(
+                event,
+                lost_packets_delta = lost_delta,
+                sent_packets_delta = sent_delta,
+                lost_bytes_delta,
+                sample_window = LOSS_STATS_SAMPLE_WINDOW,
+                lost_packets_total = path.lost_packets,
+                sent_packets_total = path.sent_packets,
+                lost_bytes_total = path.lost_bytes,
+                rtt = ?conn.rtt(),
+                mtu = path.current_mtu,
+                "quic interval path stats without new sent packets",
+            );
+            return;
+        }
+
+        let loss_rate = lost_delta as f64 / sent_delta as f64 * 100.0;
+        debug!(
+            event,
+            packet_loss_interval_rate = format_args!("{loss_rate:.2}%"),
+            lost_packets_delta = lost_delta,
+            sent_packets_delta = sent_delta,
+            lost_bytes_delta,
+            sample_window = LOSS_STATS_SAMPLE_WINDOW,
+            lost_packets_total = path.lost_packets,
+            sent_packets_total = path.sent_packets,
+            lost_bytes_total = path.lost_bytes,
+            rtt = ?conn.rtt(),
+            mtu = path.current_mtu,
+            "quic interval path stats",
+        );
+    } else {
+        let loss_rate = path.lost_packets as f64 / path.sent_packets as f64 * 100.0;
+        debug!(
+            event,
+            packet_loss_total_rate = format_args!("{loss_rate:.2}%"),
+            lost_packets_total = path.lost_packets,
+            sent_packets_total = path.sent_packets,
+            lost_bytes_total = path.lost_bytes,
+            rtt = ?conn.rtt(),
+            mtu = path.current_mtu,
+            "quic initial cumulative path stats",
+        );
+    }
+}
+
+#[derive(Clone, Copy)]
+struct PathStatsSample {
+    sent_packets: u64,
+    lost_packets: u64,
+    lost_bytes: u64,
+}
+
+#[derive(Default)]
+struct PathStatsSamples {
+    samples: HashMap<usize, VecDeque<PathStatsSample>>,
+    connection_order: VecDeque<usize>,
+}
+
+impl PathStatsSamples {
+    fn record(&mut self, conn_id: usize, sample: PathStatsSample) -> Option<PathStatsSample> {
+        if !self.samples.contains_key(&conn_id) {
+            while self.samples.len() >= MAX_TRACKED_CONNECTIONS {
+                let Some(evicted_conn_id) = self.connection_order.pop_front() else {
+                    break;
+                };
+                self.samples.remove(&evicted_conn_id);
+            }
+            self.connection_order.push_back(conn_id);
+        }
+
+        let window = self.samples.entry(conn_id).or_default();
+        window.push_back(sample);
+        while window.len() > LOSS_STATS_SAMPLE_WINDOW {
+            window.pop_front();
+        }
+
+        if window.len() < 2 {
+            None
+        } else {
+            window.front().copied()
+        }
+    }
+}
+
+fn path_stats_samples() -> &'static Mutex<PathStatsSamples> {
+    static PATH_STATS_SAMPLES: OnceLock<Mutex<PathStatsSamples>> = OnceLock::new();
+    PATH_STATS_SAMPLES.get_or_init(|| Mutex::new(PathStatsSamples::default()))
 }
 
 #[async_trait]
