@@ -26,10 +26,7 @@ use crate::{
         maybe_warn_cipher_suite_on_weak_arch, normalize_cipher_suite_preference,
     },
     error::SResult,
-    quic::{
-        MAX_DATAGRAM_WINDOW, MAX_SEND_WINDOW, MAX_STREAM_WINDOW, QuicClient, QuicConnection,
-        QuicErrorRepr, QuicServer,
-    },
+    quic::{QuicClient, QuicConnection, QuicErrorRepr, QuicServer},
 };
 
 pub type Connection = quinn::Connection;
@@ -284,9 +281,10 @@ pub fn gen_client_cfg(cfg: &ShadowQuicClientCfg) -> quinn::ClientConfig {
         tracing::warn!("disabling QUIC segmentation offload (GSO)");
     }
 
-    // Only increase receive window to maximize download speed
-    tp_cfg.stream_receive_window(MAX_STREAM_WINDOW.try_into().unwrap());
-    tp_cfg.datagram_receive_buffer_size(Some(MAX_DATAGRAM_WINDOW as usize));
+    tp_cfg.send_window(cfg.max_send_window);
+    tp_cfg.stream_receive_window(cfg.max_stream_window.try_into().unwrap());
+    tp_cfg.datagram_send_buffer_size(cfg.max_datagram_window.try_into().unwrap());
+    tp_cfg.datagram_receive_buffer_size(Some(cfg.max_datagram_window as usize));
     tp_cfg.keep_alive_interval(if cfg.keep_alive_interval > 0 {
         Some(Duration::from_millis(cfg.keep_alive_interval as u64))
     } else {
@@ -411,10 +409,10 @@ impl QuicServer for Endpoint {
         let mut config = quinn::ServerConfig::with_crypto(Arc::new(
             QuicServerConfig::try_from(crypto).expect("rustls config can't created"),
         ));
-        tp_cfg.send_window(MAX_SEND_WINDOW);
-        tp_cfg.stream_receive_window(MAX_STREAM_WINDOW.try_into().unwrap());
-        tp_cfg.datagram_send_buffer_size(MAX_DATAGRAM_WINDOW.try_into().unwrap());
-        tp_cfg.datagram_receive_buffer_size(Some(MAX_DATAGRAM_WINDOW as usize));
+        tp_cfg.send_window(cfg.max_send_window);
+        tp_cfg.stream_receive_window(cfg.max_stream_window.try_into().unwrap());
+        tp_cfg.datagram_send_buffer_size(cfg.max_datagram_window.try_into().unwrap());
+        tp_cfg.datagram_receive_buffer_size(Some(cfg.max_datagram_window as usize));
 
         config.transport_config(Arc::new(tp_cfg));
 

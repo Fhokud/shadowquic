@@ -182,6 +182,18 @@ pub fn default_mtu_discovery() -> bool {
     true
 }
 
+pub fn default_max_stream_window() -> u64 {
+    crate::quic::MAX_STREAM_WINDOW
+}
+
+pub fn default_max_send_window() -> u64 {
+    crate::quic::MAX_SEND_WINDOW
+}
+
+pub fn default_max_datagram_window() -> u64 {
+    crate::quic::MAX_DATAGRAM_WINDOW
+}
+
 pub fn default_brutal_bandwidth() -> u64 {
     10_000_000
 }

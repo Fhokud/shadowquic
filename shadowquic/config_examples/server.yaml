@@ -12,6 +12,9 @@ inbound:
     congestion-control: bbr
     zero-rtt: true
     gso: true # Enable Quinn Generic Segmentation Offload (GSO)
+    max-send-window: 40000000
+    max-stream-window: 5000000
+    max-datagram-window: 10000000
 outbound:
     type: direct
     dns-strategy: prefer-ipv4 # or prefer-ipv6, ipv4-only, ipv6-only

@@ -12,6 +12,9 @@ outbound:
     congestion-control: bbr
     zero-rtt: true
     gso: true # Enable Quinn Generic Segmentation Offload (GSO)
+    max-send-window: 40000000
+    max-stream-window: 5000000
+    max-datagram-window: 10000000
     over-stream: false  # true for udp over stream, false for udp over datagram
 log-level: "trace"
 
