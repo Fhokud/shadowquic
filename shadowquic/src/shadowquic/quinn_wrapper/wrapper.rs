@@ -281,10 +281,10 @@ pub fn gen_client_cfg(cfg: &ShadowQuicClientCfg) -> quinn::ClientConfig {
         tracing::warn!("disabling QUIC segmentation offload (GSO)");
     }
 
-    tp_cfg.send_window(cfg.max_send_window);
-    tp_cfg.stream_receive_window(cfg.max_stream_window.try_into().unwrap());
-    tp_cfg.datagram_send_buffer_size(cfg.max_datagram_window.try_into().unwrap());
-    tp_cfg.datagram_receive_buffer_size(Some(cfg.max_datagram_window as usize));
+    tp_cfg.send_window(cfg.connection_send_window);
+    tp_cfg.stream_receive_window(cfg.stream_receive_window.try_into().unwrap());
+    tp_cfg.datagram_send_buffer_size(cfg.datagram_packet_buffer_size.try_into().unwrap());
+    tp_cfg.datagram_receive_buffer_size(Some(cfg.datagram_packet_buffer_size as usize));
     tp_cfg.keep_alive_interval(if cfg.keep_alive_interval > 0 {
         Some(Duration::from_millis(cfg.keep_alive_interval as u64))
     } else {
@@ -409,10 +409,10 @@ impl QuicServer for Endpoint {
         let mut config = quinn::ServerConfig::with_crypto(Arc::new(
             QuicServerConfig::try_from(crypto).expect("rustls config can't created"),
         ));
-        tp_cfg.send_window(cfg.max_send_window);
-        tp_cfg.stream_receive_window(cfg.max_stream_window.try_into().unwrap());
-        tp_cfg.datagram_send_buffer_size(cfg.max_datagram_window.try_into().unwrap());
-        tp_cfg.datagram_receive_buffer_size(Some(cfg.max_datagram_window as usize));
+        tp_cfg.send_window(cfg.connection_send_window);
+        tp_cfg.stream_receive_window(cfg.stream_receive_window.try_into().unwrap());
+        tp_cfg.datagram_send_buffer_size(cfg.datagram_packet_buffer_size.try_into().unwrap());
+        tp_cfg.datagram_receive_buffer_size(Some(cfg.datagram_packet_buffer_size as usize));
 
         config.transport_config(Arc::new(tp_cfg));
 

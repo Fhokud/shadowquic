@@ -8,9 +8,10 @@ use crate::config::{
     AuthUser, CipherSuitePreference, CongestionControl, HasCipherSuitePreference, default_alpn,
     default_brutal_ack_compensate, default_brutal_bandwidth, default_brutal_cwnd_gain,
     default_brutal_min_ack_rate, default_brutal_min_sample_count, default_brutal_min_window,
-    default_congestion_control, default_gso, default_initial_mtu, default_keep_alive_interval,
-    default_max_datagram_window, default_max_send_window, default_max_stream_window,
-    default_min_mtu, default_mtu_discovery, default_over_stream, default_zero_rtt,
+    default_client_connection_send_window, default_congestion_control,
+    default_datagram_buffer_size, default_gso, default_initial_mtu, default_keep_alive_interval,
+    default_min_mtu, default_mtu_discovery, default_over_stream,
+    default_server_connection_send_window, default_stream_receive_window, default_zero_rtt,
 };
 
 pub fn default_rate_limit() -> u64 {
@@ -180,18 +181,18 @@ pub struct ShadowQuicServerCfg {
     /// For stable udp network, it's better to disable it and set a proper initial mtu
     #[serde(default = "default_mtu_discovery")]
     pub mtu_discovery: bool,
-    /// Maximum QUIC send window in bytes.
-    /// Default keeps the historical hard-coded value.
-    #[serde(default = "default_max_send_window")]
-    pub max_send_window: u64,
+    /// Maximum QUIC connection-level send window in bytes.
+    /// Default to 32 MB.
+    #[serde(default = "default_server_connection_send_window")]
+    pub connection_send_window: u64,
     /// Maximum QUIC stream receive window in bytes.
-    /// Default keeps the historical hard-coded value.
-    #[serde(default = "default_max_stream_window")]
-    pub max_stream_window: u64,
-    /// Maximum QUIC datagram buffer/window in bytes.
-    /// Default keeps the historical hard-coded value.
-    #[serde(default = "default_max_datagram_window")]
-    pub max_datagram_window: u64,
+    /// Default to 8 MB.
+    #[serde(default = "default_stream_receive_window")]
+    pub stream_receive_window: u64,
+    /// Maximum QUIC datagram packet send/receive buffer size in bytes.
+    /// Default to 10 MB.
+    #[serde(default = "default_datagram_buffer_size")]
+    pub datagram_packet_buffer_size: u64,
 }
 
 /// Jls upstream configuration
@@ -227,9 +228,9 @@ impl Default for ShadowQuicServerCfg {
             server_name: None,
             gso: default_gso(),
             mtu_discovery: default_mtu_discovery(),
-            max_send_window: default_max_send_window(),
-            max_stream_window: default_max_stream_window(),
-            max_datagram_window: default_max_datagram_window(),
+            connection_send_window: default_server_connection_send_window(),
+            stream_receive_window: default_stream_receive_window(),
+            datagram_packet_buffer_size: default_datagram_buffer_size(),
         }
     }
 }
@@ -250,9 +251,9 @@ impl Default for ShadowQuicClientCfg {
             keep_alive_interval: default_keep_alive_interval(),
             gso: default_gso(),
             mtu_discovery: default_mtu_discovery(),
-            max_send_window: default_max_send_window(),
-            max_stream_window: default_max_stream_window(),
-            max_datagram_window: default_max_datagram_window(),
+            connection_send_window: default_client_connection_send_window(),
+            stream_receive_window: default_stream_receive_window(),
+            datagram_packet_buffer_size: default_datagram_buffer_size(),
             cipher_suite_preference: None,
             #[cfg(target_os = "android")]
             protect_path: Default::default(),
@@ -350,18 +351,18 @@ pub struct ShadowQuicClientCfg {
     #[serde(default = "default_mtu_discovery")]
     pub mtu_discovery: bool,
 
-    /// Maximum QUIC send window in bytes.
-    /// Default keeps the historical hard-coded value.
-    #[serde(default = "default_max_send_window")]
-    pub max_send_window: u64,
+    /// Maximum QUIC connection-level send window in bytes.
+    /// Default to 8 MB.
+    #[serde(default = "default_client_connection_send_window")]
+    pub connection_send_window: u64,
     /// Maximum QUIC stream receive window in bytes.
-    /// Default keeps the historical hard-coded value.
-    #[serde(default = "default_max_stream_window")]
-    pub max_stream_window: u64,
-    /// Maximum QUIC datagram buffer/window in bytes.
-    /// Default keeps the historical hard-coded value.
-    #[serde(default = "default_max_datagram_window")]
-    pub max_datagram_window: u64,
+    /// Default to 8 MB.
+    #[serde(default = "default_stream_receive_window")]
+    pub stream_receive_window: u64,
+    /// Maximum QUIC datagram packet send/receive buffer size in bytes.
+    /// Default to 10 MB.
+    #[serde(default = "default_datagram_buffer_size")]
+    pub datagram_packet_buffer_size: u64,
 
     /// Optional TLS 1.3 cipher suite preference.
     /// If unset, use rustls/ring default preference order.

@@ -182,15 +182,19 @@ pub fn default_mtu_discovery() -> bool {
     true
 }
 
-pub fn default_max_stream_window() -> u64 {
-    crate::quic::MAX_STREAM_WINDOW
+pub fn default_client_connection_send_window() -> u64 {
+    8_000_000
 }
 
-pub fn default_max_send_window() -> u64 {
-    crate::quic::MAX_SEND_WINDOW
+pub fn default_server_connection_send_window() -> u64 {
+    32_000_000
 }
 
-pub fn default_max_datagram_window() -> u64 {
+pub fn default_stream_receive_window() -> u64 {
+    8_000_000
+}
+
+pub fn default_datagram_buffer_size() -> u64 {
     crate::quic::MAX_DATAGRAM_WINDOW
 }
 
